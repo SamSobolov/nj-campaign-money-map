@@ -19,6 +19,15 @@ An interactive map of New Jersey political party fundraising and spending, built
 
 No filings were in the data for Hudson GOP, Warren Dem, or Cape May GOP Q1.
 
+## Spreadsheet export
+
+The **Open in Google Sheets** button opens a read-only
+[Google Sheet](https://docs.google.com/spreadsheets/d/1doaetJna02isYOS9R2g6OcV0NNnOjLRuRhWxGgUE-eQ/edit?usp=sharing)
+with a Summary tab, one tab per committee per quarter (cover-page totals, every contribution, every expenditure),
+a Bucket Key and Notes. `python3 export_xlsx.py` rebuilds the workbook
+([`docs/nj_campaign_money_export.xlsx`](docs/nj_campaign_money_export.xlsx)); the sheet URL lives in
+`data/sheet_url.txt`.
+
 ## How the data is built
 
 ```
