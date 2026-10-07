@@ -1,0 +1,16 @@
+# local builds (the public site is docs/index.html)
+/index.html
+/preview.html
+# intermediate parse output (includes donor home addresses)
+data/county.json
+reports/**/txt/
+# raw Census downloads (rebuild with geo/build_geo.py)
+geo/*.zip
+geo/*.shp
+geo/*.shx
+geo/*.dbf
+geo/*.prj
+geo/*.cpg
+geo/*.xml
+__pycache__/
+.DS_Store

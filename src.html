@@ -1,0 +1,584 @@
+<title>NJ Campaign Money Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-height app. Permanent top bar; NJ map fills the stage; detail panel slides over the map (right on desktop, full sheet on phones). */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --line: #dde1e8;
+  --fg: #14171f;
+  --fg-2: #4a5161;
+  --fg-3: #7a8191;
+  --dem: #1d4fb8;
+  --dem-soft: #e6edfb;
+  --gop: #c0322b;
+  --gop-soft: #fbe9e7;
+  --empty: #e4e6ea;
+  --map-stroke: #ffffff;
+  --shadow: 0 10px 40px rgba(20, 30, 50, .18);
+  --font-ui: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* sequential ramps (light -> dark), one per party */
+  --d1: #dbe6fa; --d2: #a9c3f0; --d3: #6f97e0; --d4: #3a69c9; --d5: #173f96;
+  --r1: #f9dcd8; --r2: #f0aaa2; --r3: #e2746a; --r4: #c8443a; --r5: #8f2019;
+  /* spending buckets: categorical, fixed order */
+  --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #4a3aa7; --c8: #e34948;
+  --party: var(--dem); --party-soft: var(--dem-soft);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b; --surface: #1b1f27; --surface-2: #242934; --line: #313745;
+    --fg: #eef0f4; --fg-2: #b4bac7; --fg-3: #858c9b;
+    --dem: #6f9cf0; --dem-soft: #1d2a45; --gop: #ef7a70; --gop-soft: #3d2120;
+    --empty: #2a2f3a; --map-stroke: #12151b; --shadow: 0 10px 40px rgba(0,0,0,.5);
+    --d1: #1e3157; --d2: #284a87; --d3: #3a68bf; --d4: #6a95e6; --d5: #a9c4f5;
+    --r1: #4a2321; --r2: #7a312c; --r3: #ab463d; --r4: #dc6e64; --r5: #f4aaa3;
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b; --surface: #1b1f27; --surface-2: #242934; --line: #313745;
+  --fg: #eef0f4; --fg-2: #b4bac7; --fg-3: #858c9b;
+  --dem: #6f9cf0; --dem-soft: #1d2a45; --gop: #ef7a70; --gop-soft: #3d2120;
+  --empty: #2a2f3a; --map-stroke: #12151b; --shadow: 0 10px 40px rgba(0,0,0,.5);
+  --d1: #1e3157; --d2: #284a87; --d3: #3a68bf; --d4: #6a95e6; --d5: #a9c4f5;
+  --r1: #4a2321; --r2: #7a312c; --r3: #ab463d; --r4: #dc6e64; --r5: #f4aaa3;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+  color-scheme: dark;
+}
+body.gop { --party: var(--gop); --party-soft: var(--gop-soft); }
+
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 14px; line-height: 1.45; overflow: hidden; }
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--party); outline-offset: 2px; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+/* top bar */
+.bar { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line); position: relative; z-index: 30; }
+.brand { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.brand h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.brand small { color: var(--fg-3); font-size: 12px; }
+.sample-tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 4px; background: #f6e7b8; color: #5a4300; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; vertical-align: 2px; }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 8px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 14px; border-radius: 6px; font-weight: 600; font-size: 13px; color: var(--fg-2); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.seg.party button[data-party="D"][aria-pressed="true"] { background: var(--dem); color: #fff; }
+.seg.party button[data-party="R"][aria-pressed="true"] { background: var(--gop); color: #fff; }
+.ctl-label { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-right: 6px; }
+.ctl { display: flex; align-items: center; }
+
+/* stage + map */
+.stage { position: relative; min-height: 0; }
+.map-wrap { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr); padding: 16px; }
+.map-wrap svg { width: 100%; height: 100%; }
+.map-wrap path.geo { stroke: var(--map-stroke); stroke-width: 1.4; stroke-linejoin: round; cursor: pointer; transition: opacity .15s; }
+.map-wrap path.geo:hover, .map-wrap path.geo.sel { stroke: var(--fg); stroke-width: 2.2; }
+.map-wrap path.geo.none { fill: var(--empty); }
+.map-wrap text.lbl { font: 600 20px var(--font-num); fill: var(--fg); pointer-events: none; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
+body.layer-county .map-wrap text.lbl { font-family: var(--font-ui); font-size: 19px; }
+.legend { position: absolute; left: 16px; bottom: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; z-index: 5; }
+.legend .t { font-weight: 600; margin-bottom: 6px; }
+.legend .ramp { display: flex; gap: 2px; }
+.legend .ramp span { width: 34px; height: 10px; border-radius: 2px; }
+.legend .ticks { display: flex; justify-content: space-between; color: var(--fg-3); margin-top: 4px; gap: 8px; }
+.legend .none { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--fg-3); }
+.legend .none i { width: 14px; height: 10px; background: var(--empty); border-radius: 2px; display: inline-block; }
+.hint { position: absolute; right: 16px; top: 16px; color: var(--fg-3); font-size: 12.5px; }
+.tip { position: fixed; pointer-events: none; background: var(--fg); color: var(--bg); padding: 7px 10px; border-radius: 6px; font-size: 12.5px; z-index: 50; white-space: nowrap; box-shadow: var(--shadow); }
+.tip b { display: block; font-weight: 600; }
+
+/* panel */
+.panel { position: absolute; top: 12px; right: 12px; bottom: 12px; width: min(760px, calc(100% - 24px)); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; z-index: 20; overflow: hidden; }
+.p-head { padding: 14px 18px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+.p-title { display: flex; align-items: flex-start; gap: 12px; }
+.p-title h2 { margin: 0; font-size: 20px; letter-spacing: -.015em; text-wrap: balance; }
+.p-title .sub { color: var(--fg-3); font-size: 12.5px; }
+.p-title .x { margin-left: auto; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; width: 34px; height: 34px; font-size: 18px; line-height: 1; flex: none; }
+.party-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--party-soft); color: var(--party); font-weight: 700; font-size: 11.5px; letter-spacing: .03em; vertical-align: 3px; margin-left: 6px; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 11px; text-align: left; display: grid; line-height: 1.25; }
+.pill small { color: var(--fg-3); font-size: 11.5px; }
+.pill[aria-pressed="true"] { border-color: var(--party); background: var(--party-soft); }
+.pill[aria-pressed="true"] small { color: var(--fg-2); }
+.p-note { font-size: 12px; color: var(--fg-3); }
+.p-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 22px; }
+.p-body > * { min-width: 0; flex: none; }
+.empty-state { padding: 40px 10px; text-align: center; color: var(--fg-2); }
+.empty-state b { display: block; font-size: 16px; color: var(--fg); margin-bottom: 4px; }
+
+.kpis { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.kpi { background: var(--surface); padding: 11px 13px; display: grid; gap: 2px; }
+.kpi .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--fg-3); font-weight: 600; }
+.kpi .v { font: 500 19px var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.kpi .s { font-size: 11.5px; color: var(--fg-3); }
+.kpi.hl .v { color: var(--party); }
+
+section h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+section h3 small { font-weight: 400; color: var(--fg-3); font-size: 12px; }
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--fg-3); font-weight: 600; background: var(--surface-2); position: sticky; top: 0; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--fg); }
+th .arr { opacity: .7; }
+td.r, th.r { text-align: right; }
+td.amt { font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; }
+td.wrap { white-space: normal; min-width: 160px; }
+tr:last-child td { border-bottom: 0; }
+td .bar-cell { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+td .bar-cell i { display: block; height: 6px; border-radius: 3px; background: var(--party); opacity: .55; }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--fg-2); font-size: 11px; font-weight: 600; }
+.tag.j { background: var(--party-soft); color: var(--party); }
+.more { margin-top: 8px; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.tools input[type="search"] { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 10px; min-width: 0; flex: 1 1 180px; font: inherit; color: var(--fg); }
+.tools select { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 8px; font: inherit; color: var(--fg); }
+.chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chips button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.chips button[aria-pressed="true"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.count { color: var(--fg-3); font-size: 12px; margin-left: auto; }
+tr.vrow { cursor: pointer; }
+tr.vrow:hover td { background: var(--surface-2); }
+tr.vrow td:first-child::before { content: "▸"; display: inline-block; width: 14px; color: var(--fg-3); }
+tr.vrow.open td:first-child::before { content: "▾"; }
+tr.sub td { background: var(--surface-2); font-size: 12.5px; color: var(--fg-2); }
+tr.sub td:first-child { padding-left: 28px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+.pie-row { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: center; }
+.pie-row svg path { stroke: var(--surface); stroke-width: 2; }
+.pie-row svg path:hover { opacity: .85; }
+.leg-list { display: grid; gap: 4px; }
+.leg-list div { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; font-size: 13px; }
+.leg-list .p { color: var(--fg-3); width: 44px; text-align: right; }
+
+@media (max-width: 720px) {
+  .bar { padding: 10px 16px; }
+  .brand small { display: none; }
+  .panel { top: 0; right: 0; bottom: 0; left: 0; width: 100%; border-radius: 0; border: 0; }
+  .pie-row { grid-template-columns: 1fr; justify-items: center; }
+  .kpis { --cols: 2 !important; }
+  .pie-row .leg-list { width: 100%; }
+  .hint { display: none; }
+  .legend { left: 16px; bottom: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="bar">
+    <div class="brand">
+      <h1>NJ Campaign Money Map</h1>
+      <small id="periodNote">ELEC Form R-3 reports · County party committees · 2026 Q1–Q2</small>
+    </div>
+    <div class="ctl"><span class="ctl-label">Party</span>
+      <div class="seg party" role="group" aria-label="Party">
+        <button id="pD" data-party="D" aria-pressed="true">Democratic</button>
+        <button id="pR" data-party="R" aria-pressed="false">Republican</button>
+      </div>
+    </div>
+    <div class="ctl"><span class="ctl-label">Map</span>
+      <div class="seg" role="group" aria-label="Map layer">
+        <button id="lLD" data-layer="ld" aria-pressed="false">Legislative Districts</button>
+        <button id="lCo" data-layer="county" aria-pressed="true">Counties</button>
+      </div>
+    </div>
+  </header>
+  <main class="stage">
+    <div class="map-wrap"><svg id="map" viewBox="0 -5 800 1470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Map of New Jersey"></svg></div>
+    <div class="hint">Click a district or county to open its reports</div>
+    <div class="legend" id="legend"></div>
+    <aside class="panel" id="panel" hidden></aside>
+  </main>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const GEO = __GEO__;
+
+/* =========================================================================
+   DATA
+   County committees: parsed from ELEC Form R-3 PDFs (parse_r3.py -> build_data.py).
+   Legislative districts: not loaded yet.
+   ========================================================================= */
+const DATA = __DATA__;
+const byEntity = { c: {}, e: {} };
+DATA.contributions.forEach(r => (byEntity.c[r.entityId] ||= []).push(r));
+DATA.expenditures.forEach(r => (byEntity.e[r.entityId] ||= []).push(r));
+const ENT = Object.fromEntries(DATA.entities.map(e => [e.id, e]));
+
+/* =========================================================================
+   NAME CONSOLIDATION
+   ========================================================================= */
+const SUFFIX = new Set(["jr","sr","ii","iii","iv","esq","md","dr","mr","mrs","ms"]);
+function personKey(name) {
+  let s = name.toLowerCase().replace(/[.']/g, "").trim();
+  if (s.includes(",")) { const [last, rest] = s.split(",").map(x => x.trim()); s = `${rest} ${last}`; }
+  const toks = s.split(/\s+/).filter(t => t.length > 1 && !SUFFIX.has(t));
+  if (toks.length < 2) return toks.join(" ");
+  return `${toks[0]} ${toks[toks.length - 1]}`;
+}
+function titleCase(s) { return s.replace(/\b\w/g, c => c.toUpperCase()).replace(/\bO(b|B)rien\b/, "O'Brien"); }
+const VENDOR_ALIAS = { "facebook ads": "meta platforms", "facebook": "meta platforms", "google ads": "google", "usps": "united states postal service", "news12": "news 12 new jersey", "hilton e brunswick": "hilton east brunswick", "hq rent": "headquarters lease landlord", "adp payroll services": "adp" };
+function vendorKey(v) {
+  let s = v.toLowerCase().replace(/[.,&'-]/g, " ").replace(/\b(llc|inc|co|corp|corporation|company|na|the|ltd|lp|pc)\b/g, "").replace(/\s+/g, " ").trim();
+  return VENDOR_ALIAS[s] || s;
+}
+function firmKey(f) { return vendorKey(f); }
+
+/* =========================================================================
+   STATE + VIEW MODELS
+   ========================================================================= */
+const S = { party: "D", layer: "county", geo: null, entity: null, side: "c", acct: "all", f: { year: "all", q: "all" }, open: {} };
+
+function entitiesFor(layer, geo, party) {
+  return DATA.entities.filter(e => e.party === party && (layer === "ld" ? e.ld === geo : e.county === geo));
+}
+// Candidates in an LD for the switcher (individual candidates only)
+function ldCandidates(ld, party) { return entitiesFor("ld", ld, party).filter(e => e.type === "Candidate"); }
+function ldJoint(ld, party) { return entitiesFor("ld", ld, party).find(e => e.type === "Joint"); }
+
+// Rows for the current selection. Joint committee rows are split evenly across members.
+function currentRows() {
+  const out = { c: [], e: [], coh: 0, asOf: "", sources: [], unitemized: 0, committee: null };
+  const add = (ent, share) => {
+    for (const k of ["c", "e"]) for (const r of byEntity[k][ent.id] || []) out[k].push(share === 1 ? r : { ...r, amount: Math.round(r.amount * share * 100) / 100, joint: share });
+    out.coh += ent.cashOnHand * share; out.asOf = ent.asOf; out.sources.push(ent);
+  };
+  if (S.layer === "ld") {
+    const cand = ENT[S.entity]; if (!cand) return out;
+    add(cand, 1);
+    const j = ldJoint(S.geo, S.party);
+    if (j && j.members.includes(cand.id)) add(j, 1 / j.members.length);
+  } else {
+    entitiesFor("county", S.geo, S.party).filter(e => S.acct === "all" || e.id === S.acct).forEach(e => add(e, 1));
+    const com = DATA.committees[`${S.geo}|${S.party}`];
+    if (com && S.acct === "all") {
+      // use the committee's filed closing balance and its unitemized ($200 or less) receipts
+      out.coh = com.cashOnHand; out.asOf = com.asOf; out.unitemized = com.unitemized; out.committee = com;
+    }
+  }
+  return out;
+}
+
+function geoCash(layer, geo, party) {
+  // Map shading: cash on hand from the latest filing; null when nothing is filed for that place
+  const ents = entitiesFor(layer, geo, party);
+  if (!ents.length) return null;
+  const com = layer === "county" && DATA.committees[`${geo}|${party}`];
+  return com ? com.cashOnHand : ents.reduce((s, e) => s + e.cashOnHand, 0);
+}
+
+/* =========================================================================
+   FORMATTING
+   ========================================================================= */
+const usd = n => "$" + Math.round(n).toLocaleString("en-US");
+const usd2 = n => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const short = n => n >= 1e6 ? "$" + (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n);
+const fdate = d => { const [y, m, dd] = d.split("-"); return `${+m}/${+dd}/${y}`; };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const quarter = d => "Q" + (Math.floor((+d.slice(5, 7) - 1) / 3) + 1);
+
+/* =========================================================================
+   MAP
+   ========================================================================= */
+const svg = document.getElementById("map");
+const tip = document.getElementById("tip");
+const SVGNS = "http://www.w3.org/2000/svg";
+function drawMap() {
+  svg.innerHTML = "";
+  const feats = S.layer === "ld" ? GEO.lds : GEO.counties;
+  const totals = feats.map(f => geoCash(S.layer, f.id, S.party));
+  const pos = totals.filter(t => t != null).sort((a, b) => a - b);
+  const qs = [.2, .4, .6, .8].map(p => pos[Math.floor(p * (pos.length - 1))] || 0);
+  const ramp = (S.party === "D" ? ["--d1","--d2","--d3","--d4","--d5"] : ["--r1","--r2","--r3","--r4","--r5"]);
+  const step = t => qs.filter(q => t > q).length;
+  feats.forEach((f, i) => {
+    const p = document.createElementNS(SVGNS, "path");
+    p.setAttribute("d", f.d);
+    p.setAttribute("class", "geo" + (totals[i] != null ? "" : " none") + (S.geo === f.id ? " sel" : ""));
+    if (totals[i] != null) p.style.fill = `var(${ramp[step(totals[i])]})`;
+    p.setAttribute("tabindex", "0");
+    const label = S.layer === "ld" ? `Legislative District ${f.id}` : `${f.id} County`;
+    p.setAttribute("aria-label", `${label}: ${totals[i] != null ? usd(totals[i]) + " cash on hand" : "no filings yet"}`);
+    p.addEventListener("mousemove", ev => { tip.hidden = false; tip.innerHTML = `<b>${esc(label)}</b>${totals[i] != null ? usd(totals[i]) + " cash on hand" : "No filings yet"}`; tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (ev.clientY + 14) + "px"; });
+    p.addEventListener("mouseleave", () => tip.hidden = true);
+    p.addEventListener("click", () => openGeo(f.id));
+    p.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openGeo(f.id); } });
+    svg.appendChild(p);
+  });
+  feats.forEach(f => {
+    const t = document.createElementNS(SVGNS, "text");
+    t.setAttribute("x", f.c[0]); t.setAttribute("y", f.c[1]); t.setAttribute("text-anchor", "middle"); t.setAttribute("dominant-baseline", "middle");
+    t.setAttribute("class", "lbl"); t.textContent = f.id; svg.appendChild(t);
+  });
+  const lg = document.getElementById("legend");
+  const bounds = [pos[0] || 0, ...qs, pos[pos.length - 1] || 0];
+  lg.innerHTML = `<div class="t">Cash on hand · ${S.party === "D" ? "Democratic" : "Republican"}</div>
+    <div class="ramp">${ramp.map(v => `<span style="background:var(${v})"></span>`).join("")}</div>
+    <div class="ticks num"><span>${short(bounds[0])}</span><span>${short(bounds[5])}</span></div>
+    <div class="none"><i></i>No filings yet</div>`;
+}
+
+/* =========================================================================
+   PANEL
+   ========================================================================= */
+const panel = document.getElementById("panel");
+function openGeo(id) {
+  S.geo = id; S.acct = "all"; S.open = {};
+  if (S.layer === "ld") { const c = ldCandidates(id, S.party); S.entity = c[0]?.id || null; }
+  drawMap(); renderPanel(); panel.hidden = false;
+}
+function closePanel() { S.geo = null; panel.hidden = true; drawMap(); }
+
+function renderPanel() {
+  if (!S.geo) return;
+  const partyName = S.party === "D" ? "Democratic" : "Republican";
+  const title = S.layer === "ld" ? `Legislative District ${S.geo}` : `${S.geo} County`;
+  let switcher = "", note = "";
+  const ents = entitiesFor(S.layer, S.geo, S.party);
+  if (S.layer === "ld") {
+    const cands = ldCandidates(S.geo, S.party);
+    if (cands.length && !cands.some(c => c.id === S.entity)) S.entity = cands[0].id;
+    switcher = cands.length ? `<div class="pills" role="group" aria-label="Candidate">${cands.map(c => `<button class="pill" data-ent="${c.id}" aria-pressed="${c.id === S.entity}"><span>${esc(c.candidate.replace(/ \(LD \d+\)$/, ""))}</span><small>${esc(c.office)}</small></button>`).join("")}</div>` : "";
+    const j = ldJoint(S.geo, S.party);
+    if (j && cands.length) note = `<div class="p-note">Includes a 1/${j.members.length} share of <b>${esc(j.name)}</b>, split evenly across its ${j.members.length} members.</div>`;
+  } else if (ents.length) {
+    switcher = `<div class="pills" role="group" aria-label="Account">${[{ id: "all", account: "All accounts combined" }, ...ents].map(e => `<button class="pill" data-acct="${e.id}" aria-pressed="${S.acct === e.id}"><span>${esc(e.account)}</span><small>${e.id === "all" ? ents.length + " ELEC account" + (ents.length > 1 ? "s" : "") : "Cash on hand " + usd(e.cashOnHand)}</small></button>`).join("")}</div>`;
+    const com = DATA.committees[`${S.geo}|${S.party}`];
+    note = `<div class="p-note">${esc(com ? com.name : ents[0].name)}${com ? " · " + com.filings.sort((a, b) => a.quarter - b.quarter).map(f => `Q${f.quarter} filed ${esc(f.filed.split(" ")[0])}${f.amendment ? ` (amendment #${f.amendment})` : ""}, ELEC #${esc(f.elecId)}`).join(" · ") : ""}</div>`;
+  }
+  const has = ents.length > 0;
+  panel.innerHTML = `
+    <div class="p-head">
+      <div class="p-title"><div><h2>${esc(title)}<span class="party-chip">${partyName}</span></h2><div class="sub">${S.layer === "ld" ? "Candidate election funds + joint committee · 2027 primary cycle" : "County party committee · 2026 Q1–Q2 · ELEC Form R-3"}</div></div>
+        <button class="x" id="close" aria-label="Close">×</button></div>
+      ${switcher}${note}
+      ${has ? `<div><div class="seg" role="group" aria-label="Report side"><button data-side="c" aria-pressed="${S.side === "c"}">Contributions</button><button data-side="e" aria-pressed="${S.side === "e"}">Expenditures</button></div></div>` : ""}
+    </div>
+    <div class="p-body" id="pbody">${has ? "" : `<div class="empty-state">${S.layer === "ld" ? `<b>Legislative reports not loaded yet</b>Candidate and joint committee reports for ${esc(title)} will appear here once they are added.` : `<b>No filings yet</b>No ${partyName} county committee reports are in the data for ${esc(title)}.`}</div>`}</div>`;
+  panel.querySelector("#close").onclick = closePanel;
+  panel.querySelectorAll("[data-ent]").forEach(b => b.onclick = () => { S.entity = b.dataset.ent; S.open = {}; renderPanel(); });
+  panel.querySelectorAll("[data-acct]").forEach(b => b.onclick = () => { S.acct = b.dataset.acct; S.open = {}; renderPanel(); });
+  panel.querySelectorAll("[data-side]").forEach(b => b.onclick = () => { S.side = b.dataset.side; renderPanel(); });
+  if (has) (S.side === "c" ? renderContrib : renderExpend)(document.getElementById("pbody"));
+}
+
+/* ----- generic sortable table with "show more" ----- */
+function table(host, { cols, rows, sort, limit = 25, step = 50, rowHtml, empty = "Nothing to show." }) {
+  let st = { ...sort }, lim = limit;
+  const draw = () => {
+    const sorted = [...rows].sort((a, b) => { const c = cols.find(c => c.key === st.key); const va = c.val(a), vb = c.val(b); return (va > vb ? 1 : va < vb ? -1 : 0) * st.dir; });
+    const shown = sorted.slice(0, lim);
+    host.innerHTML = `<div class="tbl-wrap"><table><thead><tr>${cols.map(c => `<th class="sortable ${c.r ? "r" : ""}" data-k="${c.key}">${c.label}${st.key === c.key ? ` <span class="arr">${st.dir > 0 ? "↑" : "↓"}</span>` : ""}</th>`).join("")}</tr></thead>
+      <tbody>${shown.length ? shown.map(rowHtml).join("") : `<tr><td colspan="${cols.length}" style="color:var(--fg-3)">${empty}</td></tr>`}</tbody></table></div>
+      ${sorted.length > lim ? `<button class="more">Show ${Math.min(step, sorted.length - lim)} more · ${sorted.length - lim} hidden</button>` : ""}`;
+    host.querySelectorAll("th[data-k]").forEach(th => th.onclick = () => { const k = th.dataset.k; st = { key: k, dir: st.key === k ? -st.dir : (cols.find(c => c.key === k).r ? -1 : 1) }; draw(); });
+    const m = host.querySelector(".more"); if (m) m.onclick = () => { lim += step; draw(); };
+  };
+  draw();
+}
+
+function periodFilter(host, onChange) {
+  const years = [...new Set([...DATA.contributions, ...DATA.expenditures].map(r => r.date.slice(0, 4)))].sort();
+  host.innerHTML = `<label class="ctl-label" for="fy">Year</label><select id="fy"><option value="all">All years</option>${years.map(y => `<option ${S.f.year === y ? "selected" : ""}>${y}</option>`).join("")}</select>
+    <div class="chips" role="group" aria-label="Quarter">${["all","Q1","Q2","Q3","Q4"].map(q => `<button data-q="${q}" aria-pressed="${S.f.q === q}">${q === "all" ? "All quarters" : q}</button>`).join("")}</div><span class="count"></span>`;
+  host.querySelector("#fy").onchange = e => { S.f.year = e.target.value; onChange(); };
+  host.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { S.f.q = b.dataset.q; host.querySelectorAll("[data-q]").forEach(x => x.setAttribute("aria-pressed", x === b)); onChange(); });
+}
+const passPeriod = r => (S.f.year === "all" || r.date.startsWith(S.f.year)) && (S.f.q === "all" || quarter(r.date) === S.f.q);
+const jointTag = r => r.joint ? ` <span class="tag j" title="Joint committee share">Joint ÷${Math.round(1 / r.joint)}</span>` : "";
+
+/* ----- contributions ----- */
+function renderContrib(body) {
+  const { c: rows, coh, asOf, unitemized } = currentRows();
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  const indiv = rows.filter(r => r.type === "Individual");
+  const indivTotal = indiv.reduce((s, r) => s + r.amount, 0);
+
+  // consolidate every contributor (any type) by name key
+  const by = new Map();
+  for (const r of rows) {
+    const k = r.type === "Individual" ? "p:" + personKey(r.name) : "o:" + firmKey(r.name);
+    const g = by.get(k) || { k, names: new Map(), type: r.type, total: 0, n: 0, employer: r.employer, occupation: r.occupation };
+    g.names.set(r.name, (g.names.get(r.name) || 0) + 1); g.total += r.amount; g.n++; if (r.employer) g.employer = r.employer;
+    by.set(k, g);
+  }
+  const groups = [...by.values()].map(g => {
+    const canon = [...g.names.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    return { ...g, name: g.type === "Individual" && canon === canon.toUpperCase() ? titleCase(canon.toLowerCase()) : canon, variants: g.names.size };
+  });
+  const people = groups.filter(g => g.type === "Individual");
+
+  // firms: direct business/PAC gifts + individuals' gifts via Employer field
+  const firms = new Map();
+  const fget = (key, label) => firms.get(key) || { label, direct: 0, emp: 0, empN: new Set() };
+  for (const r of rows) {
+    if (r.type === "Individual") {
+      if (!r.employer || /^(self[- ]employed|retired|none|not employed|n\/a)$/i.test(r.employer)) continue;
+      const k = firmKey(r.employer), f = fget(k, r.employer); f.emp += r.amount; f.empN.add(personKey(r.name)); firms.set(k, f);
+    } else if (!["Political committee", "Small-dollar group"].includes(r.type)) {
+      const k = firmKey(r.name), f = fget(k, r.name); f.direct += r.amount; firms.set(k, f);
+    }
+  }
+  const firmRows = [...firms.values()].map(f => ({ ...f, total: f.direct + f.emp, people: f.empN.size }));
+
+  body.innerHTML = `
+    <div class="kpis">
+      <div class="kpi hl"><span class="k">Cash on hand</span><span class="v">${usd(coh)}</span><span class="s">as of ${fdate(asOf)}</span></div>
+      <div class="kpi"><span class="k">Total raised</span><span class="v">${usd(total + unitemized)}</span><span class="s">${unitemized ? `incl. ${usd(unitemized)} unitemized ($200 or less)` : "itemized contributions"}</span></div>
+      <div class="kpi"><span class="k">Avg donation</span><span class="v">${usd(rows.length ? total / rows.length : 0)}</span><span class="s">all itemized contributions</span></div>
+      <div class="kpi"><span class="k">Avg donation</span><span class="v">${usd(indiv.length ? indivTotal / indiv.length : 0)}</span><span class="s">individuals only</span></div>
+      <div class="kpi"><span class="k">Contributors</span><span class="v">${groups.length.toLocaleString()}</span><span class="s">${people.length.toLocaleString()} individuals</span></div>
+      <div class="kpi"><span class="k">Contributions</span><span class="v">${rows.length.toLocaleString()}</span><span class="s">${indiv.length.toLocaleString()} from individuals</span></div>
+    </div>
+    <section><h3>Top contributors <small>Consolidated by name · all contributor types</small></h3><div id="tTop"></div></section>
+    <section><h3>By person <small>Individuals, with name variants merged within this ${S.layer === "ld" ? "district &amp; party" : "county &amp; party"}</small></h3>
+      <div class="tools"><input type="search" id="qPerson" placeholder="Search names or employers" aria-label="Search people"></div><div id="tPeople"></div></section>
+    <section><h3>By firm <small>Direct gifts from the business, PAC or union + gifts from people who list it as employer</small></h3>
+      <div class="tools"><input type="search" id="qFirm" placeholder="Search firms" aria-label="Search firms"></div><div id="tFirm"></div></section>
+    <section><h3>Every contribution <small>As filed</small></h3><div class="tools" id="fC"></div><div id="tAll"></div></section>`;
+
+  const maxTop = Math.max(...groups.map(g => g.total), 1);
+  table(body.querySelector("#tTop"), {
+    rows: groups, limit: 10, step: 40, sort: { key: "total", dir: -1 },
+    cols: [{ key: "name", label: "Contributor", val: g => g.name.toLowerCase() }, { key: "type", label: "Type", val: g => g.type }, { key: "n", label: "Gifts", r: 1, val: g => g.n }, { key: "total", label: "Total", r: 1, val: g => g.total }],
+    rowHtml: g => `<tr><td>${esc(g.name)}${g.variants > 1 ? ` <span class="tag" title="Filed under ${g.variants} spellings">${g.variants} spellings</span>` : ""}</td><td><span class="tag">${esc(g.type)}</span></td><td class="amt">${g.n}</td><td class="amt"><div class="bar-cell"><i style="width:${Math.max(2, 70 * g.total / maxTop)}px"></i>${usd(g.total)}</div></td></tr>`
+  });
+  const drawPeople = () => {
+    const q = body.querySelector("#qPerson").value.toLowerCase();
+    table(body.querySelector("#tPeople"), {
+      rows: people.filter(p => !q || p.name.toLowerCase().includes(q) || (p.employer || "").toLowerCase().includes(q)), sort: { key: "total", dir: -1 },
+      cols: [{ key: "name", label: "Name", val: g => g.name.toLowerCase() }, { key: "employer", label: "Employer", val: g => (g.employer || "").toLowerCase() }, { key: "occupation", label: "Occupation", val: g => g.occupation || "" }, { key: "n", label: "Gifts", r: 1, val: g => g.n }, { key: "total", label: "Total", r: 1, val: g => g.total }],
+      rowHtml: g => `<tr><td>${esc(g.name)}${g.variants > 1 ? ` <span class="tag" title="${esc([...g.names.keys()].join(" · "))}">${g.variants} spellings</span>` : ""}</td><td>${esc(g.employer || "—")}</td><td>${esc(g.occupation || "—")}</td><td class="amt">${g.n}</td><td class="amt">${usd(g.total)}</td></tr>`
+    });
+  };
+  body.querySelector("#qPerson").oninput = drawPeople; drawPeople();
+  const drawFirms = () => {
+    const q = body.querySelector("#qFirm").value.toLowerCase();
+    table(body.querySelector("#tFirm"), {
+      rows: firmRows.filter(f => !q || f.label.toLowerCase().includes(q)), sort: { key: "total", dir: -1 },
+      cols: [{ key: "label", label: "Firm", val: f => f.label.toLowerCase() }, { key: "direct", label: "Direct $", r: 1, val: f => f.direct }, { key: "emp", label: "Employee $", r: 1, val: f => f.emp }, { key: "people", label: "Employees", r: 1, val: f => f.people }, { key: "total", label: "Total", r: 1, val: f => f.total }],
+      rowHtml: f => `<tr><td>${esc(f.label)}</td><td class="amt">${f.direct ? usd(f.direct) : "—"}</td><td class="amt">${f.emp ? usd(f.emp) : "—"}</td><td class="amt">${f.people || "—"}</td><td class="amt"><b>${usd(f.total)}</b></td></tr>`
+    });
+  };
+  body.querySelector("#qFirm").oninput = drawFirms; drawFirms();
+
+  const drawAll = () => {
+    const rs = rows.filter(passPeriod);
+    body.querySelector("#fC .count").textContent = `${rs.length.toLocaleString()} contributions · ${usd(rs.reduce((s, r) => s + r.amount, 0))}`;
+    table(body.querySelector("#tAll"), {
+      rows: rs, limit: 50, step: 100, sort: { key: "date", dir: -1 }, empty: "No contributions in this period.",
+      cols: [{ key: "name", label: "Name", val: r => r.name.toLowerCase() }, { key: "type", label: "Type", val: r => r.type }, { key: "employer", label: "Employer", val: r => r.employer || "" }, { key: "occupation", label: "Occupation", val: r => r.occupation || "" }, { key: "date", label: "Date", val: r => r.date }, { key: "amount", label: "Amount", r: 1, val: r => r.amount }],
+      rowHtml: r => `<tr><td>${esc(r.name)}${jointTag(r)}</td><td><span class="tag">${esc(r.type)}</span></td><td>${esc(r.employer || "—")}</td><td>${esc(r.occupation || "—")}</td><td class="num">${fdate(r.date)}</td><td class="amt">${usd2(r.amount)}</td></tr>`
+    });
+  };
+  periodFilter(body.querySelector("#fC"), drawAll); drawAll();
+}
+
+/* ----- expenditures ----- */
+const BUCKET_ORDER = Object.keys(DATA.key);
+const bucketColor = code => `var(--c${BUCKET_ORDER.indexOf(code) + 1})`;
+function renderExpend(body) {
+  const { e: rows, coh, asOf } = currentRows();
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  const buckets = BUCKET_ORDER.map(code => ({ code, name: DATA.key[code], total: rows.filter(r => r.code === code).reduce((s, r) => s + r.amount, 0) })).filter(b => b.total > 0);
+  const vend = new Map();
+  for (const r of rows) {
+    const k = vendorKey(r.vendor);
+    const v = vend.get(k) || { k, names: new Map(), total: 0, n: 0, codes: new Map(), rows: [] };
+    v.names.set(r.vendor, (v.names.get(r.vendor) || 0) + 1); v.total += r.amount; v.n++; v.codes.set(r.code, (v.codes.get(r.code) || 0) + r.amount); v.rows.push(r);
+    vend.set(k, v);
+  }
+  const vendors = [...vend.values()].map(v => ({ ...v, name: [...v.names.entries()].sort((a, b) => b[0].length - a[0].length)[0][0], code: [...v.codes.entries()].sort((a, b) => b[1] - a[1])[0][0] }));
+
+  body.innerHTML = `
+    <div class="kpis" style="--cols:4">
+      <div class="kpi hl"><span class="k">Cash on hand</span><span class="v">${usd(coh)}</span><span class="s">as of ${fdate(asOf)}</span></div>
+      <div class="kpi"><span class="k">Total spent</span><span class="v">${usd(total)}</span><span class="s">2026 Q1–Q2</span></div>
+      <div class="kpi"><span class="k">Expenditures</span><span class="v">${rows.length.toLocaleString()}</span><span class="s">line items</span></div>
+      <div class="kpi"><span class="k">Vendors</span><span class="v">${vendors.length}</span><span class="s">after merging names</span></div>
+    </div>
+    <section><h3>Where the money went <small>By spending bucket</small></h3><div class="pie-row"><div id="pie"></div><div class="leg-list" id="pieLeg"></div></div></section>
+    <section><h3>Vendors <small>Name variants merged · click a vendor to see each payment</small></h3><div id="tV"></div></section>
+    <section><h3>Every expenditure <small>As filed</small></h3><div class="tools" id="fE"></div><div id="tE"></div></section>`;
+
+  // pie
+  const R0 = 100, cx = 110, cy = 110; let a0 = -Math.PI / 2;
+  const arcs = buckets.map(b => {
+    const a1 = a0 + 2 * Math.PI * b.total / total;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const d = buckets.length === 1 ? `M${cx},${cy - R0}A${R0},${R0} 0 1 1 ${cx - .01},${cy - R0}Z` : `M${cx},${cy}L${cx + R0 * Math.cos(a0)},${cy + R0 * Math.sin(a0)}A${R0},${R0} 0 ${large} 1 ${cx + R0 * Math.cos(a1)},${cy + R0 * Math.sin(a1)}Z`;
+    a0 = a1; return { ...b, d };
+  });
+  body.querySelector("#pie").innerHTML = `<svg viewBox="0 0 220 220" width="220" height="220" role="img" aria-label="Spending by bucket">${arcs.map((a, i) => `<path d="${a.d}" style="fill:${bucketColor(a.code)}" data-i="${i}"></path>`).join("")}</svg>`;
+  body.querySelectorAll("#pie path").forEach(p => {
+    const a = arcs[+p.dataset.i];
+    p.addEventListener("mousemove", ev => { tip.hidden = false; tip.innerHTML = `<b>${esc(a.name)}</b>${usd(a.total)} · ${(100 * a.total / total).toFixed(1)}%`; tip.style.left = Math.min(ev.clientX + 14, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (ev.clientY + 14) + "px"; });
+    p.addEventListener("mouseleave", () => tip.hidden = true);
+  });
+  body.querySelector("#pieLeg").innerHTML = [...buckets].sort((a, b) => b.total - a.total).map(b => `<div><span class="swatch" style="background:${bucketColor(b.code)}"></span><span>${esc(b.name)}</span><span class="num">${usd(b.total)}</span><span class="num p">${(100 * b.total / total).toFixed(1)}%</span></div>`).join("") || `<div style="color:var(--fg-3)">No expenditures filed.</div>`;
+
+  // vendor rollup with expandable payments
+  renderPanelVendorOnly(body.querySelector("#tV"), vendors, total, 25);
+
+  const drawAll = () => {
+    const rs = rows.filter(passPeriod);
+    body.querySelector("#fE .count").textContent = `${rs.length.toLocaleString()} expenditures · ${usd(rs.reduce((s, r) => s + r.amount, 0))}`;
+    table(body.querySelector("#tE"), {
+      rows: rs, limit: 50, step: 100, sort: { key: "date", dir: -1 }, empty: "No expenditures in this period.",
+      cols: [{ key: "vendor", label: "Vendor", val: r => r.vendor.toLowerCase() }, { key: "address", label: "Vendor address", val: r => r.address || "" }, { key: "purpose", label: "Purpose", val: r => r.purpose }, { key: "code", label: "Bucket", val: r => DATA.key[r.code] }, { key: "date", label: "Date", val: r => r.date }, { key: "amount", label: "Amount", r: 1, val: r => r.amount }],
+      rowHtml: r => `<tr><td>${esc(r.vendor)}${jointTag(r)}</td><td>${esc(r.address || "—")}</td><td>${esc(r.purpose)}</td><td><span class="swatch" style="background:${bucketColor(r.code)}"></span>${esc(DATA.key[r.code])}</td><td class="num">${fdate(r.date)}</td><td class="amt">${usd2(r.amount)}</td></tr>`
+    });
+  };
+  periodFilter(body.querySelector("#fE"), drawAll); drawAll();
+}
+// Re-render the vendor table after expand/collapse without losing how many rows were shown
+function renderVendorsKeep(host, vendors, total, shownCount) {
+  const clone = host.cloneNode(false); host.replaceWith(clone); clone.id = "tV";
+  renderPanelVendorOnly(clone, vendors, total, Math.max(25, shownCount));
+}
+function renderPanelVendorOnly(tV, vendors, total, limit) {
+  table(tV, {
+    rows: vendors, limit, sort: { key: "total", dir: -1 },
+    cols: [{ key: "name", label: "Vendor", val: v => v.name.toLowerCase() }, { key: "code", label: "Bucket", val: v => DATA.key[v.code] }, { key: "n", label: "Payments", r: 1, val: v => v.n }, { key: "pct", label: "% of spend", r: 1, val: v => v.total }, { key: "total", label: "Total paid", r: 1, val: v => v.total }],
+    rowHtml: v => {
+      const open = S.open[v.k];
+      return `<tr class="vrow ${open ? "open" : ""}" data-v="${esc(v.k)}" tabindex="0" aria-expanded="${!!open}"><td>${esc(v.name)}${v.names.size > 1 ? ` <span class="tag" title="${esc([...v.names.keys()].join(" · "))}">${v.names.size} spellings</span>` : ""}</td><td><span class="swatch" style="background:${bucketColor(v.code)}"></span>${esc(DATA.key[v.code])}</td><td class="amt">${v.n}</td><td class="amt">${(100 * v.total / total).toFixed(1)}%</td><td class="amt">${usd2(v.total)}</td></tr>` +
+        (open ? [...v.rows].sort((a, b) => b.date.localeCompare(a.date)).map(r => `<tr class="sub"><td>${esc(r.vendor)}${jointTag(r)}</td><td>${esc(r.purpose)}</td><td class="num">${fdate(r.date)}</td><td></td><td class="amt">${usd2(r.amount)}</td></tr>`).join("") : "");
+    }
+  });
+  tV.addEventListener("click", ev => { const tr = ev.target.closest("tr.vrow"); if (!tr) return; S.open[tr.dataset.v] = !S.open[tr.dataset.v]; renderVendorsKeep(tV, vendors, total, tV.querySelectorAll("tr.vrow").length); });
+  tV.addEventListener("keydown", ev => { if ((ev.key === "Enter" || ev.key === " ") && ev.target.matches("tr.vrow")) { ev.preventDefault(); ev.target.click(); } });
+}
+
+/* =========================================================================
+   TOP BAR
+   ========================================================================= */
+document.querySelectorAll("[data-party]").forEach(b => b.onclick = () => {
+  S.party = b.dataset.party; document.body.classList.toggle("gop", S.party === "R");
+  document.querySelectorAll("[data-party]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  // stay on the same place; pick that party's first candidate
+  if (S.geo && S.layer === "ld") { const c = ldCandidates(S.geo, S.party); S.entity = c[0]?.id || null; }
+  S.acct = "all"; S.open = {};
+  drawMap(); renderPanel();
+});
+document.querySelectorAll("[data-layer]").forEach(b => b.onclick = () => {
+  if (S.layer === b.dataset.layer) return;
+  S.layer = b.dataset.layer; document.body.classList.toggle("layer-county", S.layer === "county");
+  document.querySelectorAll("[data-layer]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  S.geo = null; panel.hidden = true; drawMap();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) closePanel(); });
+document.body.classList.add("layer-county");
+drawMap();
+</script>
