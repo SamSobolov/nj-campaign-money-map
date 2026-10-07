@@ -3,7 +3,7 @@
 Spending buckets are assigned from ELEC's purpose text until the team's own key codes arrive;
 BUCKET_RULES below is the mapping to review.
 """
-import json, re
+import csv, json, re
 
 from parse_r3 import contributor_type
 
@@ -111,10 +111,11 @@ def main():
         p = re.sub(r"\s+", " ", x["purpose"].upper()).strip() or "(blank)"
         s = seen.setdefault(p, [x["code"], 0.0, 0])
         s[1] += x["amount"]; s[2] += 1
-    with open("data/bucket_mapping.csv", "w") as f:
-        f.write("purpose_as_filed,bucket,total,count\n")
+    with open("data/bucket_mapping.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["purpose_as_filed", "bucket", "total", "count"])
         for p, (code, tot, n) in sorted(seen.items(), key=lambda kv: -kv[1][1]):
-            f.write(f'"{p}",{KEY[code]},{tot:.2f},{n}\n')
+            w.writerow([p, KEY[code], f"{tot:.2f}", n])
     by = {}
     for x in expenditures:
         by[x["code"]] = by.get(x["code"], 0) + x["amount"]

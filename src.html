@@ -74,6 +74,9 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .seg.party button[data-party="R"][aria-pressed="true"] { background: var(--gop); color: #fff; }
 .ctl-label { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin-right: 6px; }
 .ctl { display: flex; align-items: center; }
+.sheet-btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-weight: 600; font-size: 13px; text-decoration: none; white-space: nowrap; }
+.sheet-btn:hover { border-color: var(--party); color: var(--party); }
+.sheet-btn:focus-visible { outline: 2px solid var(--party); outline-offset: 2px; }
 
 /* stage + map */
 .stage { position: relative; min-height: 0; }
@@ -192,6 +195,10 @@ tr.sub td:first-child { padding-left: 28px; }
         <button id="lCo" data-layer="county" aria-pressed="true">Counties</button>
       </div>
     </div>
+    <a class="sheet-btn" id="sheetBtn" href="__SHEET_URL__" target="_blank" rel="noopener" title="Every filing, one tab per committee per quarter">
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="1.5" width="12" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2 6h12M2 10h12M7 6v8.5" stroke="currentColor" stroke-width="1.5"/></svg>
+      Open in Google Sheets
+    </a>
   </header>
   <main class="stage">
     <div class="map-wrap"><svg id="map" viewBox="0 -5 800 1470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Map of New Jersey"></svg></div>

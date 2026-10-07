@@ -4,10 +4,15 @@
   index.html       Claude Artifact build (the artifact host adds its own <head>)
   preview.html     local check
 """
-import os
+import os, re
 
 s = open("src.html").read()
-page = s.replace("__GEO__", open("geo.json").read()).replace("__DATA__", open("data/site_data.json").read())
+# Google Sheet export link (data/sheet_url.txt); the button is removed until the sheet exists
+sheet_url = open("data/sheet_url.txt").read().strip() if os.path.exists("data/sheet_url.txt") else ""
+if not sheet_url:
+    s = re.sub(r'\s*<a class="sheet-btn".*?</a>', "", s, flags=re.S)
+page = (s.replace("__GEO__", open("geo.json").read()).replace("__DATA__", open("data/site_data.json").read())
+         .replace("__SHEET_URL__", sheet_url))
 
 HEAD = """<!doctype html>
 <html lang="en">
