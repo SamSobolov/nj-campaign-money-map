@@ -1,13 +1,13 @@
 """Export the site data to a workbook with one tab per committee per quarter (for the Google Sheet).
 
-Usage: python3 export_xlsx.py  ->  data/nj_campaign_money_export.xlsx
+Usage: python export_xlsx.py  ->  data/nj_campaign_money_export.xlsx
 """
 import csv, json
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-D = json.load(open("data/site_data.json"))
+D = json.load(open("data/site_data.json", encoding="utf-8"))
 ENT = {e["id"]: e for e in D["entities"]}
 KEY = D["key"]
 PARTY = {"D": "Democratic", "R": "Republican"}
@@ -35,7 +35,7 @@ summary.title = "Summary"
 S_HEAD = ["County", "Party", "Committee", "Quarter", "Filed", "Amendment", "ELEC filing #", "Opening balance",
           "Total receipts", "Unitemized ($200 or less)", "Itemized contributions", "# contributions",
           "Total expenditures (filed)", "# expenditures", "Closing balance (cash on hand)", "Tab"]
-summary.append(["NJ Campaign Money Map: county party committees, 2026 Q1–Q2 (ELEC Form R-3)"])
+summary.append([f"NJ Campaign Money Map: county party committees, {D['period']} (ELEC Form R-3), pulled {D['fetched']}"])
 summary["A1"].font = TITLE
 summary.append(["One tab per committee per quarter. Individuals' home addresses are omitted. Source PDFs and parser: "
                 "github.com/SamSobolov/nj-campaign-money-map"])
@@ -49,14 +49,14 @@ for ck, com in sorted(D["committees"].items()):
     for f in sorted(com["filings"], key=lambda f: f["quarter"]):
         q = f["quarter"]
         name = tab_name(county, party, q)
-        ents = {e["id"] for e in D["entities"] if e["county"] == county and e["party"] == party}
+        ents = {e["id"] for e in D["entities"] if e["type"] == "County Committee" and e["county"] == county and e["party"] == party}
         contribs = sorted((c for c in D["contributions"] if c["entityId"] in ents and c["q"] == q),
                           key=lambda c: (c["date"], c["name"]))
         expends = sorted((x for x in D["expenditures"] if x["entityId"] in ents and x["q"] == q),
                          key=lambda x: (x["date"], x["vendor"]))
 
         ws = wb.create_sheet(name)
-        ws["A1"] = f'{com["name"]} · {county} County {PARTY[party]} · 2026 Q{q}'
+        ws["A1"] = f'{com["name"]} · {county} County {PARTY[party]} · {D["period"].split()[0]} Q{q}'
         ws["A1"].font = TITLE
         ws["A2"] = (f'ELEC Form R-3 filing #{f["elecId"]} · filed {f["filed"]}'
                     + (f' · amendment #{f["amendment"]}' if f["amendment"] else ""))
@@ -119,7 +119,7 @@ key = wb.create_sheet("Bucket Key")
 key.append(["Spending bucket", "ELEC purpose as filed", "Total", "# expenditures"])
 for c in key[1]:
     c.font = BOLD; c.fill = HEAD_FILL
-for row in csv.DictReader(open("data/bucket_mapping.csv")):
+for row in csv.DictReader(open("data/bucket_mapping.csv", encoding="utf-8")):
     key.append([row["bucket"], row["purpose_as_filed"], float(row["total"]), int(row["count"])])
     key.cell(key.max_row, 3).number_format = MONEY
 key.freeze_panes = "A2"
@@ -127,11 +127,11 @@ widths(key, {1: 26, 2: 60, 3: 14, 4: 14})
 
 notes = wb.create_sheet("Notes")
 for line in [
-    "Source: NJ ELEC Form R-3 quarterly reports for county party committees, 2026 Q1–Q2.",
+    f"Source: NJ ELEC Form R-3 quarterly reports for county party committees, {D['period']}, pulled from ELEC on {D['fetched']}.",
     "Contributions = Schedule 1 (monetary, over $200) and Schedule 2 (in-kind). Unitemized ($200 or less) appears only as a total.",
     "Expenditures = Schedules 8 (operating), 10 (contributions to candidates/committees) and 11 (on behalf of candidates). Sub-payee breakdowns are not repeated.",
     "Voided checks appear as negative amounts, as filed. When a quarter was amended, the latest amendment is used.",
-    "Contributor Type is inferred from employer/occupation and the name; ELEC's R-3 does not label it.",
+    "Contributor Type is the type the filer selected, taken from ELEC's search database; where no database row matches it is inferred from employer/occupation and the name.",
     "Spending buckets are provisional, assigned from ELEC purpose text (see Bucket Key).",
     "Street addresses for individual donors and individual payees are omitted.",
 ]:

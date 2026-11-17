@@ -6,12 +6,22 @@
 """
 import os, re
 
-s = open("src.html").read()
+
+def read(path):
+    return open(path, encoding="utf-8").read()
+
+
+def write(path, text):
+    # same bytes on every OS: UTF-8 with Unix line endings
+    open(path, "w", encoding="utf-8", newline="\n").write(text)
+
+
+s = read("src.html")
 # Google Sheet export link (data/sheet_url.txt); the button is removed until the sheet exists
-sheet_url = open("data/sheet_url.txt").read().strip() if os.path.exists("data/sheet_url.txt") else ""
+sheet_url = read("data/sheet_url.txt").strip() if os.path.exists("data/sheet_url.txt") else ""
 if not sheet_url:
     s = re.sub(r'\s*<a class="sheet-btn".*?</a>', "", s, flags=re.S)
-page = (s.replace("__GEO__", open("geo.json").read()).replace("__DATA__", open("data/site_data.json").read())
+page = (s.replace("__GEO__", read("geo.json")).replace("__DATA__", read("data/site_data.json"))
          .replace("__SHEET_URL__", sheet_url))
 
 HEAD = """<!doctype html>
@@ -30,7 +40,7 @@ HEAD = """<!doctype html>
 """
 
 os.makedirs("docs", exist_ok=True)
-open("docs/index.html", "w").write(HEAD + page + "\n</body>\n</html>\n")
-open("index.html", "w").write(page)
-open("preview.html", "w").write(HEAD + page + "\n</body>\n</html>\n")
+write("docs/index.html", HEAD + page + "\n</body>\n</html>\n")
+write("index.html", page)
+write("preview.html", HEAD + page + "\n</body>\n</html>\n")
 print(f"docs/index.html {os.path.getsize('docs/index.html'):,} bytes")
