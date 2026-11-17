@@ -14,3 +14,12 @@ geo/*.cpg
 geo/*.xml
 __pycache__/
 .DS_Store
+
+# raw ELEC API pulls (include donor home addresses)
+data/raw/
+
+# candidate and municipal report PDFs (re-download with fetch_elec.py)
+reports/legislative/
+reports/countywide/
+reports/middlesex/
+data/parsed/

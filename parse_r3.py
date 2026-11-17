@@ -1,19 +1,21 @@
-"""Parse ELEC Form R-3 (political party committee) PDFs into JSON for the map site.
+"""Parse ELEC quarterly report PDFs into JSON for the map site.
 
-Usage: python3 parse_r3.py reports/county data/county.json
+Usage: python parse_r3.py [scope ...]      (default: every scope fetch_elec.py has saved)
 
-Keeps only 2026 quarterly R-3s from the 21 county committees; when a quarter
-has an original and an amendment, the latest-filed one wins.
+Handles Form R-3 (party committees) and Form R-1 (candidates and joint candidates committees). The
+two forms share one layout: the same cover summary and the same numbered schedules.
+
+Reads the filing lists that fetch_elec.py saved (data/raw/<scope>.json) and parses exactly the
+filings ELEC lists as the latest amendment of each report. Writes data/parsed/<scope>.json
+(gitignored: donor home addresses). Each parsed filing is cached in data/parsed/cache/, since a
+filing never changes once it has a filing number.
 """
-import glob, json, re, sys
-from datetime import datetime
+import json, os, re, sys
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timedelta
 import pdfplumber
 
-COUNTIES = ["Atlantic", "Bergen", "Burlington", "Camden", "Cape May", "Cumberland", "Essex", "Gloucester", "Hudson",
-            "Hunterdon", "Mercer", "Middlesex", "Monmouth", "Morris", "Ocean", "Passaic", "Salem", "Somerset", "Sussex",
-            "Union", "Warren"]
-# committee names as filed that don't spell out the county or party
-ALIASES = {"GCGOP": ("Gloucester", "R"), "CCGOP": ("Camden", "R")}
+from fetch_elec import SCOPES, SINCE
 
 DATE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
 MONEY = re.compile(r"^\(?\$[\d,]+\.\d{2}\)?$")
@@ -38,16 +40,6 @@ def page_lines(page):
 
 def txt(ws, lo=-1, hi=9999):
     return " ".join(t for x, t in ws if lo <= x < hi).strip()
-
-
-def committee_of(name):
-    up = name.upper()
-    for k, v in ALIASES.items():
-        if up.startswith(k):
-            return v
-    county = next((c for c in COUNTIES if c.upper() in up or (c == "Cape May" and "CAPE MAY" in up)), None)
-    party = "D" if "DEMOCRA" in up else "R" if ("REPUBLICAN" in up or "GOP" in up) else None
-    return (county, party) if county and party else (None, None)
 
 
 BIZ = re.compile(r"\b(LLC|L\.L\.C|INC|CORP|CORPORATION|CO\b|COMPANY|P\.?C\.?|LLP|P\.?A\.?|PLLC|LTD|GROUP|ASSOC|ASSOCIATES|"
@@ -79,24 +71,72 @@ def contributor_type(name, employer, occupation):
     return "Business"
 
 
+QEND = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}
+PERIOD_NAMES = {"Pre29": "29-day pre-election", "Pre11": "11-day pre-election", "Post20": "20-day post-election"}
+# Rough distance from election day to the end of each election report's period. Used only to put a
+# committee's reports in order; the site never shows a date derived from it.
+PERIOD_OFFSET = {"Pre29": -32, "Pre11": -14, "Post20": 17}
+
+
+def period_label(r):
+    if r["quarter"]:
+        return f"{r['year']} Q{r['quarter']}"
+    return f"{PERIOD_NAMES[r['period']]} report, {r['electionType'].lower()} {r['year']}".replace("  ", " ")
+
+
+def period_order(r):
+    """Sortable ISO date for ordering a committee's reports."""
+    if r["quarter"] or not r["electionDate"]:
+        return f"{r['year']}-{QEND[r['quarter'] or 4]}"
+    return (datetime.strptime(r["electionDate"], "%Y-%m-%d") + timedelta(days=PERIOD_OFFSET[r["period"]])).strftime("%Y-%m-%d")
+
+
 def parse_report(path):
     with pdfplumber.open(path) as pdf:
         pages = [(p.extract_text() or "", page_lines(p)) for p in pdf.pages]
     full = "\n".join(t for t, _ in pages)
-    if "FORM R-3" not in full[:400] or not re.search(r"\((\d{4})-Q(\d)\)", full[:600]):
+    form = re.search(r"FORM (R-[13])\b", full[:400])
+    # report period as ELEC prints it: (2026-Q1), or for a candidate's election reports
+    # (2026-Pre29), (2026-Pre11), (2026-Post20)
+    per = re.search(r"\((\d{4})-(Q[1-4]|Pre29|Pre11|Post20)\)", full[:600])
+    if not form or not per:
         return None
-    year, q = re.search(r"\((\d{4})-Q(\d)\)", full[:600]).groups()
-    name = re.search(r"COMMITTEE NAME OR APPROVED ACRONYM\s*\n(.+)", full).group(1).strip()
+    year, period = per.groups()
+    q = period[1] if period[0] == "Q" else 0
+    election = re.search(r"ELECTION DATE ELECTION TYPE\s*\n(\d{2}/\d{2}/\d{4}) +([A-Z][^\n]*)", full[:1600])
+    name = re.search(r"(?:COMMITTEE NAME OR APPROVED ACRONYM|CANDIDATE OR COMMITTEE NAME)\s*\n(.+)", full).group(1).strip()
     filed = re.search(r"(\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2} [AP]M)", full[:800])
     amend = re.search(r"Amendment #(\d+)", full[:900])
-    num = lambda label: money(re.search(label + r"[^\$]*(\$[\d,]+\.\d{2})", full).group(1))
+    # a negative balance prints in parentheses
+    num = lambda label: money(re.search(label + r"[^\$(]*(\(?\$[\d,]+\.\d{2}\)?)", full).group(1))
     rep = {
-        "file": path.split("/")[-1], "committee": name, "year": int(year), "quarter": int(q),
+        "file": path.split("/")[-1], "form": form.group(1), "committee": name, "year": int(year), "quarter": int(q),
+        "period": period, "electionDate": iso(election.group(1)) if election else "",
+        "electionType": election.group(2).strip() if election else "",
         "filed": filed.group(1) if filed else "", "amendment": int(amend.group(1)) if amend else 0,
         "opening": num(r"OPENING BALANCE"), "receipts": num(r"RECEIPTS \(\+\)"),
         "expenditures": num(r"EXPENDITURES \(-\)"), "closing": num(r"CLOSING BALANCE"),
         "unitemized": num(r"1\. Monetary Contributions, \$\d+ or less"),
         "contributions": [], "expenses": [], "accounts": [],
+    }
+
+    def line(label, optional=False):
+        # Table I / II, column A: the amount follows the label, sometimes after a wrapped line
+        m = re.search(label + r"[\s\S]{0,160}?(\(?\$[\d,]+\.\d{2}\)?)", full)
+        if not m and not optional:
+            raise ValueError(f"cover page has no line matching {label!r}")
+        return money(m.group(1)) if m else 0.0
+
+    # cover-page totals that check_r3.py reconciles the schedules against
+    rep["cover"] = {
+        "itemized": line(r"2\. Monetary Contributions \(In Excess"),
+        "inKindSmall": line(r"3\. In-kind contributions, \$\d+ or less"),
+        "inKind": line(r"4\. In-kind contributions, more than"),
+        "refundsIn": line(r"6\. Refunded Disbursements"),
+        "operating": line(r"1\. Operating Disbursement"),
+        "other": line(r"1a\. Other Expenditures", optional=True),      # Schedule 9, on Form R-1 only
+        "toCandidates": line(r"2a\. NJ Gub") + line(r"2b\. NJ Leg") + line(r"2c\. All other"),
+        "onBehalf": line(r"3a\. NJ Gub") + line(r"3b\. NJ Leg") + line(r"3c\. All other") + line(r"3d\. Indep"),
     }
     # per-account balances from the Depository Summary
     for m in re.finditer(r"Account Name Asset Type\s*\n([^\n]+)\n(?:.*\n){0,8}?.*?(\*{4}\d{4})\s*\n"
@@ -140,7 +180,7 @@ def parse_report(path):
                 if int(m.group(1)) != sched:
                     flush(); sched = int(m.group(1)); skip = False; mode = None
                 continue
-            if line.startswith("New Jersey Election Law Enforcement Commission") or line.startswith("FORM R-3"):
+            if line.startswith("New Jersey Election Law Enforcement Commission") or line.startswith("FORM R-"):
                 continue
             if line.startswith("Account:"):
                 flush(); account = re.sub(r"^Account:\s*", "", line).strip(); continue
@@ -180,7 +220,7 @@ def parse_report(path):
                     cur["employerAddress"] = (cur.get("employerAddress", "") + " " + a).strip()
                 elif mode == "occupation":
                     cur["occupation"] = (cur.get("occupation", "") + " " + line).strip()
-            elif sched in (8, 11):
+            elif sched in (8, 9, 11):      # Schedule 9 (other expenses, Form R-1 only) is laid out like Schedule 8
                 if line.startswith("Sub Payee List") or line.startswith("ALLOCATION OF EXPENDITURES"):
                     skip = True; continue
                 if line.startswith("Check No") or line.startswith("Check"):
@@ -238,37 +278,63 @@ def parse_report(path):
     return rep
 
 
-def main(src, out):
-    reports = []
-    for f in sorted(glob.glob(src + "/*.pdf")):
-        try:
-            r = parse_report(f)
-        except Exception as e:  # report the file and keep going
-            print("FAILED", f, e); continue
-        if not r or r["year"] != 2026:
-            continue
-        county, party = committee_of(r["committee"])
-        if not county:
-            print("SKIP (not a county committee)", f, r["committee"]); continue
-        r["county"], r["party"] = county, party
-        reports.append(r)
-    # latest amendment per committee-quarter wins
-    best = {}
-    for r in reports:
-        k = (r["county"], r["party"], r["quarter"])
-        if k not in best or (r["amendment"], r["filed"]) > (best[k]["amendment"], best[k]["filed"]):
-            best[k] = r
-    final = sorted(best.values(), key=lambda r: (r["county"], r["party"], r["quarter"]))
-    for r in final:
-        for c in r["contributions"]:
-            c["type"] = contributor_type(c["name"], c["employer"], c["occupation"])
-        ci = sum(c["amount"] for c in r["contributions"])
-        ce = sum(e["amount"] for e in r["expenses"])
-        print(f'{r["county"]:<11}{r["party"]} Q{r["quarter"]} am{r["amendment"]} contribs {len(r["contributions"]):>4} '
-              f'${ci:>12,.2f} (+unitemized ${r["unitemized"]:,.2f}) | expenses {len(r["expenses"]):>4} ${ce:>12,.2f} '
-              f'vs filed ${r["expenditures"]:>12,.2f} | COH ${r["closing"]:,.2f}')
-    json.dump({"generated": datetime.now().isoformat(timespec="seconds"), "reports": final}, open(out, "w"), indent=1)
+def parse_to_cache(job):
+    """Parse one filing and save it. Returns (doc, error or None). Runs in a worker process."""
+    folder, doc = job
+    try:
+        r = parse_report(f"{folder}/{doc}.pdf")     # None for a PDF that is not a quarterly R-1/R-3
+        if r:
+            for c in r["contributions"]:
+                c["type"] = contributor_type(c["name"], c["employer"], c["occupation"])
+        json.dump(r, open(f"data/parsed/cache/{doc}.json", "w", encoding="utf-8"))
+        return doc, None
+    except Exception as err:      # name the filing and keep going; check_r3.py reports the gap
+        return doc, repr(err)[:120]
+
+
+def main(scopes):
+    os.makedirs("data/parsed/cache", exist_ok=True)
+    for scope in scopes:
+        raw = json.load(open(f"data/raw/{scope}.json", encoding="utf-8"))
+        todo = [(e, doc) for e in raw["entities"] for doc in e["reports"]]
+        new = sorted({(raw["pdfs"], doc) for _, doc in todo if not os.path.exists(f"data/parsed/cache/{doc}.json")})
+        errors = {}
+        if new:     # PDF text extraction is slow, so spread new filings across the CPU cores
+            with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 2) - 1)) as pool:
+                for i, (doc, err) in enumerate(pool.map(parse_to_cache, new, chunksize=4), 1):
+                    if err:
+                        errors[doc] = err
+                    if i % 100 == 0:
+                        print(f"  {scope}: {i}/{len(new)} new filings parsed", flush=True)
+        final, skipped, failed = [], [], []
+        for e, doc in todo:
+            if doc in errors:
+                failed.append((doc, e["name"], errors[doc]))
+                continue
+            r = json.load(open(f"data/parsed/cache/{doc}.json", encoding="utf-8"))
+            if not r or r["year"] < SINCE:
+                skipped.append(doc)
+                continue
+            r["entity"], r["doc"] = e["entity"], doc
+            r["label"], r["order"] = period_label(r), period_order(r)
+            final.append(r)
+        # one report per committee and period: ELEC can list the same quarter under two form names
+        best = {}
+        for r in final:
+            k = (r["entity"], r["year"], r["period"], r["electionDate"])
+            if k not in best or (r["amendment"], r["doc"]) > (best[k]["amendment"], best[k]["doc"]):
+                best[k] = r
+        final = sorted(best.values(), key=lambda r: (r["entity"], r["order"]))
+        out = f"data/parsed/{scope}.json"
+        json.dump({"generated": datetime.now().isoformat(timespec="seconds"), "scope": scope, "fetched": raw["fetched"],
+                   "reports": final, "failed": failed}, open(out, "w", encoding="utf-8"))
+        print(f"{scope}: {len(final)} reports parsed -> {out}" +
+              (f" | {len(skipped)} skipped (before {SINCE}, or not a period this parser knows)" if skipped else "") +
+              (f" | {len(failed)} FAILED" if failed else ""))
+        for doc, name, err in failed:
+            print(f"  FAILED filing {doc} ({name}): {err}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    have = [s for s in SCOPES if os.path.exists(f"data/raw/{s}.json")]
+    main(sys.argv[1:] or have)

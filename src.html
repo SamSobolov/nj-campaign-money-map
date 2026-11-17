@@ -181,7 +181,7 @@ tr.sub td:first-child { padding-left: 28px; }
   <header class="bar">
     <div class="brand">
       <h1>NJ Campaign Money Map</h1>
-      <small id="periodNote">ELEC Form R-3 reports · County party committees · 2026 Q1–Q2</small>
+      <small id="periodNote">ELEC quarterly reports · Party committees and candidates</small>
     </div>
     <div class="ctl"><span class="ctl-label">Party</span>
       <div class="seg party" role="group" aria-label="Party">
@@ -214,10 +214,12 @@ const GEO = __GEO__;
 
 /* =========================================================================
    DATA
-   County committees: parsed from ELEC Form R-3 PDFs (parse_r3.py -> build_data.py).
+   County committees: ELEC Form R-3 PDFs, fetched and cross-checked through ELEC's search site
+   (fetch_elec.py -> parse_r3.py -> check_r3.py -> build_data.py).
    Legislative districts: not loaded yet.
    ========================================================================= */
 const DATA = __DATA__;
+document.getElementById("periodNote").textContent += " · " + DATA.period;
 const byEntity = { c: {}, e: {} };
 DATA.contributions.forEach(r => (byEntity.c[r.entityId] ||= []).push(r));
 DATA.expenditures.forEach(r => (byEntity.e[r.entityId] ||= []).push(r));
@@ -245,44 +247,59 @@ function firmKey(f) { return vendorKey(f); }
 /* =========================================================================
    STATE + VIEW MODELS
    ========================================================================= */
-const S = { party: "D", layer: "county", geo: null, entity: null, side: "c", acct: "all", f: { year: "all", q: "all" }, open: {} };
+// view: on the county layer, "party" (the county party committee) or the id of a candidate or committee
+const S = { party: "D", layer: "county", geo: null, entity: null, view: "party", side: "c", acct: "all", f: { year: "all", q: "all" }, open: {} };
 
 function entitiesFor(layer, geo, party) {
   return DATA.entities.filter(e => e.party === party && (layer === "ld" ? e.ld === geo : e.county === geo));
 }
-// Candidates in an LD for the switcher (individual candidates only)
-function ldCandidates(ld, party) { return entitiesFor("ld", ld, party).filter(e => e.type === "Candidate"); }
-function ldJoint(ld, party) { return entitiesFor("ld", ld, party).find(e => e.type === "Joint"); }
+const isAccount = e => e.type === "County Committee";
+// A joint candidates committee is folded into its candidates; one with no linked candidate is listed by itself
+const listed = e => !isAccount(e) && (e.type !== "Joint" || !(e.members || []).length);
+const OFFICE_ORDER = ["State Senate", "State Assembly", "County Executive", "County Commissioner", "County Sheriff", "County Clerk", "County Surrogate", "Mayor", "Municipal Office"];
+const officeRank = e => { const i = OFFICE_ORDER.indexOf(e.office); return i < 0 ? 99 : i; };
+const byOffice = (a, b) => officeRank(a) - officeRank(b) || a.name.localeCompare(b.name);
+// Entries in an LD for the switcher: candidates, plus any joint committee with no linked candidate
+function ldCandidates(ld, party) { return entitiesFor("ld", ld, party).filter(listed).sort(byOffice); }
+// Candidates, joint committees and municipal party committees in a county (beyond the county party committee)
+function countyCampaigns(county, party) { return entitiesFor("county", county, party).filter(listed).sort(byOffice); }
+// candidate id -> the joint committees that candidate files through
+const JOINTS = {};
+DATA.entities.filter(e => e.type === "Joint").forEach(j => (j.members || []).forEach(m => (JOINTS[m] ||= []).push(j)));
+function jointsFor(cand) { return JOINTS[cand.id] || []; }
+const currentEntity = () => S.layer === "ld" ? ENT[S.entity] : S.view === "party" ? null : ENT[S.view];
 
 // Rows for the current selection. Joint committee rows are split evenly across members.
 function currentRows() {
-  const out = { c: [], e: [], coh: 0, asOf: "", sources: [], unitemized: 0, committee: null };
+  const out = { c: [], e: [], coh: 0, asOf: "", asOfText: "no report on file", sources: [], unitemized: 0, committee: null };
   const add = (ent, share) => {
     for (const k of ["c", "e"]) for (const r of byEntity[k][ent.id] || []) out[k].push(share === 1 ? r : { ...r, amount: Math.round(r.amount * share * 100) / 100, joint: share });
-    out.coh += ent.cashOnHand * share; out.asOf = ent.asOf; out.sources.push(ent);
+    out.coh += ent.cashOnHand * share; out.sources.push(ent);
+    // a balance from a pre- or post-election report is described by the report, not by a date
+    if (ent.asOf > out.asOf) { out.asOf = ent.asOf; out.asOfText = ent.asOfLabel ? "per " + ent.asOfLabel : "as of " + fdate(ent.asOf); }
+    out.unitemized += (ent.unitemized || 0) * share;
   };
-  if (S.layer === "ld") {
-    const cand = ENT[S.entity]; if (!cand) return out;
-    add(cand, 1);
-    const j = ldJoint(S.geo, S.party);
-    if (j && j.members.includes(cand.id)) add(j, 1 / j.members.length);
+  if (S.layer === "ld" || S.view !== "party") {
+    const ent = currentEntity(); if (!ent) return out;
+    add(ent, 1);
+    if (ent.type === "Candidate") for (const j of jointsFor(ent)) add(j, 1 / j.members.length);
   } else {
-    entitiesFor("county", S.geo, S.party).filter(e => S.acct === "all" || e.id === S.acct).forEach(e => add(e, 1));
+    entitiesFor("county", S.geo, S.party).filter(isAccount).filter(e => S.acct === "all" || e.id === S.acct).forEach(e => add(e, 1));
     const com = DATA.committees[`${S.geo}|${S.party}`];
     if (com && S.acct === "all") {
       // use the committee's filed closing balance and its unitemized ($200 or less) receipts
-      out.coh = com.cashOnHand; out.asOf = com.asOf; out.unitemized = com.unitemized; out.committee = com;
+      out.coh = com.cashOnHand; out.asOf = com.asOf; out.asOfText = "as of " + fdate(com.asOf); out.unitemized = com.unitemized; out.committee = com;
     }
   }
   return out;
 }
 
 function geoCash(layer, geo, party) {
-  // Map shading: cash on hand from the latest filing; null when nothing is filed for that place
-  const ents = entitiesFor(layer, geo, party);
-  if (!ents.length) return null;
-  const com = layer === "county" && DATA.committees[`${geo}|${party}`];
-  return com ? com.cashOnHand : ents.reduce((s, e) => s + e.cashOnHand, 0);
+  // Map shading: cash on hand from the latest filing; null when nothing is filed for that place.
+  // Counties are shaded by the county party committee, districts by their candidates' funds.
+  if (layer === "county") { const com = DATA.committees[`${geo}|${party}`]; return com ? com.cashOnHand : null; }
+  const ents = entitiesFor(layer, geo, party).filter(e => e.asOf);
+  return ents.length ? ents.reduce((s, e) => s + e.cashOnHand, 0) : null;
 }
 
 /* =========================================================================
@@ -341,39 +358,82 @@ function drawMap() {
    ========================================================================= */
 const panel = document.getElementById("panel");
 function openGeo(id) {
-  S.geo = id; S.acct = "all"; S.open = {};
+  S.geo = id; S.acct = "all"; S.view = "party"; S.open = {};
   if (S.layer === "ld") { const c = ldCandidates(id, S.party); S.entity = c[0]?.id || null; }
   drawMap(); renderPanel(); panel.hidden = false;
 }
 function closePanel() { S.geo = null; panel.hidden = true; drawMap(); }
 
+// filings arrive in report order
+const filingList = fs => fs.map(f => `${esc(f.label || "Q" + f.quarter)} filed ${esc(f.filed.split(" ")[0])}${f.amendment ? ` (amendment #${f.amendment})` : ""}, ELEC #${esc(f.elecId)}`).join(" · ");
+// Header note for a candidate, joint committee or municipal party committee
+function entityNote(ent) {
+  const joints = ent.type === "Candidate" ? jointsFor(ent) : [];
+  const parts = [`<b>${esc(ent.name)}</b> · ${esc(ent.office)}${ent.muni ? ", " + esc(ent.muni) : ""} · ${ent.year}${ent.type === "Municipal Committee" ? "" : " " + esc(ent.elections.join(" and ").toLowerCase())}`];
+  if (ent.filings.length) parts.push(filingList(ent.filings)); else if (ent.note) parts.push(esc(ent.note));
+  if (ent.carried) parts.push(`Moved ${usd(ent.carried)} from the primary account to the general-election account. That transfer is not counted as spending.`);
+  for (const j of joints) parts.push(`Includes a 1/${j.members.length} share of the joint committee <b>${esc(j.name)}</b>, split evenly across its ${j.members.length} member${j.members.length > 1 ? "s" : ""}.`);
+  return `<div class="p-note">${parts.join("<br>")}</div>`;
+}
+const hasMoney = ent => ent.filings.length > 0 || (ent.type === "Candidate" && jointsFor(ent).some(j => j.filings.length));
+const optionLabel = e => `${e.name}${e.type === "Candidate" ? " · " + e.office.replace(/^(State|County) /, "") : ""}${hasMoney(e) ? "" : " (no itemized report)"}`;
+// Dropdown for a county: the party committee, then every candidate and committee on file there
+function viewPicker(com, camps) {
+  const groups = new Map();
+  for (const e of camps) {
+    const g = e.scope === "countywide" ? `Countywide candidates · ${e.year}` : e.scope === "municipal_party" ? "Municipal party committees" : `${e.muni} · ${e.year}`;
+    if (!groups.has(g)) groups.set(g, []); groups.get(g).push(e);
+  }
+  const rank = g => g.startsWith("Countywide") ? 0 : g.startsWith("Municipal party") ? 1 : 2;
+  const keys = [...groups.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  return `<div class="tools"><label class="ctl-label" for="view">Show</label><select id="view">
+    <option value="party" ${S.view === "party" ? "selected" : ""}>${esc(com ? com.name : "County party committee")}</option>
+    ${keys.map(g => `<optgroup label="${esc(g)}">${groups.get(g).map(e => `<option value="${e.id}" ${S.view === e.id ? "selected" : ""}>${esc(e.scope === "municipal_party" ? e.muni + " · " + e.name : optionLabel(e))}</option>`).join("")}</optgroup>`).join("")}
+  </select></div>`;
+}
+
 function renderPanel() {
   if (!S.geo) return;
   const partyName = S.party === "D" ? "Democratic" : "Republican";
   const title = S.layer === "ld" ? `Legislative District ${S.geo}` : `${S.geo} County`;
-  let switcher = "", note = "";
-  const ents = entitiesFor(S.layer, S.geo, S.party);
+  let switcher = "", note = "", sub = "", has = false, empty = "";
   if (S.layer === "ld") {
     const cands = ldCandidates(S.geo, S.party);
     if (cands.length && !cands.some(c => c.id === S.entity)) S.entity = cands[0].id;
-    switcher = cands.length ? `<div class="pills" role="group" aria-label="Candidate">${cands.map(c => `<button class="pill" data-ent="${c.id}" aria-pressed="${c.id === S.entity}"><span>${esc(c.candidate.replace(/ \(LD \d+\)$/, ""))}</span><small>${esc(c.office)}</small></button>`).join("")}</div>` : "";
-    const j = ldJoint(S.geo, S.party);
-    if (j && cands.length) note = `<div class="p-note">Includes a 1/${j.members.length} share of <b>${esc(j.name)}</b>, split evenly across its ${j.members.length} members.</div>`;
-  } else if (ents.length) {
-    switcher = `<div class="pills" role="group" aria-label="Account">${[{ id: "all", account: "All accounts combined" }, ...ents].map(e => `<button class="pill" data-acct="${e.id}" aria-pressed="${S.acct === e.id}"><span>${esc(e.account)}</span><small>${e.id === "all" ? ents.length + " ELEC account" + (ents.length > 1 ? "s" : "") : "Cash on hand " + usd(e.cashOnHand)}</small></button>`).join("")}</div>`;
+    switcher = cands.length ? `<div class="pills" role="group" aria-label="Candidate">${cands.map(c => `<button class="pill" data-ent="${c.id}" aria-pressed="${c.id === S.entity}"><span>${esc(c.name)}</span><small>${esc(c.office.replace(/^State /, ""))} · ${c.year}${hasMoney(c) ? "" : " · no report"}</small></button>`).join("")}</div>` : "";
+    const ent = currentEntity();
+    sub = `Senate and Assembly candidates · reports for ${DATA.since} onward`;
+    if (ent) { note = entityNote(ent); has = hasMoney(ent); empty = `<b>No itemized report</b>${esc(ent.note || "Nothing has been filed for this period.")}`; }
+    else empty = `<b>No candidates on file</b>ELEC lists no ${partyName} Senate or Assembly candidates for ${esc(title)} yet.`;
+  } else {
+    const accts = entitiesFor("county", S.geo, S.party).filter(isAccount), camps = countyCampaigns(S.geo, S.party);
     const com = DATA.committees[`${S.geo}|${S.party}`];
-    note = `<div class="p-note">${esc(com ? com.name : ents[0].name)}${com ? " · " + com.filings.sort((a, b) => a.quarter - b.quarter).map(f => `Q${f.quarter} filed ${esc(f.filed.split(" ")[0])}${f.amendment ? ` (amendment #${f.amendment})` : ""}, ELEC #${esc(f.elecId)}`).join(" · ") : ""}</div>`;
+    if (S.view !== "party" && !camps.some(c => c.id === S.view)) S.view = "party";
+    const picker = camps.length ? viewPicker(com, camps) : "";
+    const ent = currentEntity();
+    if (ent) {
+      switcher = picker; note = entityNote(ent); has = hasMoney(ent);
+      sub = `${esc(ent.office)} · reports for ${DATA.since} onward`;
+      empty = `<b>No itemized report</b>${esc(ent.note || "Nothing has been filed for this period.")}`;
+    } else {
+      sub = `County party committee · ${esc(DATA.period)} · ELEC Form R-3`;
+      has = accts.length > 0;
+      empty = `<b>No filings yet</b>No ${partyName} county committee reports are in the data for ${esc(title)}.`;
+      switcher = picker + (has ? `<div class="pills" role="group" aria-label="Account">${[{ id: "all", account: "All accounts combined" }, ...accts].map(e => `<button class="pill" data-acct="${e.id}" aria-pressed="${S.acct === e.id}"><span>${esc(e.account)}</span><small>${e.id === "all" ? accts.length + " ELEC account" + (accts.length > 1 ? "s" : "") : "Cash on hand " + usd(e.cashOnHand)}</small></button>`).join("")}</div>` : "");
+      if (has) note = `<div class="p-note">${esc(com ? com.name : accts[0].name)}${com ? " · " + filingList(com.filings) : ""}</div>`;
+    }
   }
-  const has = ents.length > 0;
   panel.innerHTML = `
     <div class="p-head">
-      <div class="p-title"><div><h2>${esc(title)}<span class="party-chip">${partyName}</span></h2><div class="sub">${S.layer === "ld" ? "Candidate election funds + joint committee · 2027 primary cycle" : "County party committee · 2026 Q1–Q2 · ELEC Form R-3"}</div></div>
+      <div class="p-title"><div><h2>${esc(title)}<span class="party-chip">${partyName}</span></h2><div class="sub">${sub}</div></div>
         <button class="x" id="close" aria-label="Close">×</button></div>
       ${switcher}${note}
       ${has ? `<div><div class="seg" role="group" aria-label="Report side"><button data-side="c" aria-pressed="${S.side === "c"}">Contributions</button><button data-side="e" aria-pressed="${S.side === "e"}">Expenditures</button></div></div>` : ""}
     </div>
-    <div class="p-body" id="pbody">${has ? "" : `<div class="empty-state">${S.layer === "ld" ? `<b>Legislative reports not loaded yet</b>Candidate and joint committee reports for ${esc(title)} will appear here once they are added.` : `<b>No filings yet</b>No ${partyName} county committee reports are in the data for ${esc(title)}.`}</div>`}</div>`;
+    <div class="p-body" id="pbody">${has ? "" : `<div class="empty-state">${empty}</div>`}</div>`;
   panel.querySelector("#close").onclick = closePanel;
+  const view = panel.querySelector("#view");
+  if (view) view.onchange = () => { S.view = view.value; S.acct = "all"; S.open = {}; renderPanel(); };
   panel.querySelectorAll("[data-ent]").forEach(b => b.onclick = () => { S.entity = b.dataset.ent; S.open = {}; renderPanel(); });
   panel.querySelectorAll("[data-acct]").forEach(b => b.onclick = () => { S.acct = b.dataset.acct; S.open = {}; renderPanel(); });
   panel.querySelectorAll("[data-side]").forEach(b => b.onclick = () => { S.side = b.dataset.side; renderPanel(); });
@@ -395,8 +455,10 @@ function table(host, { cols, rows, sort, limit = 25, step = 50, rowHtml, empty =
   draw();
 }
 
+// years present in the data, worked out once (there are tens of thousands of rows)
+const YEARS = [...new Set([...DATA.contributions, ...DATA.expenditures].map(r => r.date.slice(0, 4)))].sort();
 function periodFilter(host, onChange) {
-  const years = [...new Set([...DATA.contributions, ...DATA.expenditures].map(r => r.date.slice(0, 4)))].sort();
+  const years = YEARS;
   host.innerHTML = `<label class="ctl-label" for="fy">Year</label><select id="fy"><option value="all">All years</option>${years.map(y => `<option ${S.f.year === y ? "selected" : ""}>${y}</option>`).join("")}</select>
     <div class="chips" role="group" aria-label="Quarter">${["all","Q1","Q2","Q3","Q4"].map(q => `<button data-q="${q}" aria-pressed="${S.f.q === q}">${q === "all" ? "All quarters" : q}</button>`).join("")}</div><span class="count"></span>`;
   host.querySelector("#fy").onchange = e => { S.f.year = e.target.value; onChange(); };
@@ -407,7 +469,7 @@ const jointTag = r => r.joint ? ` <span class="tag j" title="Joint committee sha
 
 /* ----- contributions ----- */
 function renderContrib(body) {
-  const { c: rows, coh, asOf, unitemized } = currentRows();
+  const { c: rows, coh, asOfText, unitemized } = currentRows();
   const total = rows.reduce((s, r) => s + r.amount, 0);
   const indiv = rows.filter(r => r.type === "Individual");
   const indivTotal = indiv.reduce((s, r) => s + r.amount, 0);
@@ -441,7 +503,7 @@ function renderContrib(body) {
 
   body.innerHTML = `
     <div class="kpis">
-      <div class="kpi hl"><span class="k">Cash on hand</span><span class="v">${usd(coh)}</span><span class="s">as of ${fdate(asOf)}</span></div>
+      <div class="kpi hl"><span class="k">Cash on hand</span><span class="v">${usd(coh)}</span><span class="s">${esc(asOfText)}</span></div>
       <div class="kpi"><span class="k">Total raised</span><span class="v">${usd(total + unitemized)}</span><span class="s">${unitemized ? `incl. ${usd(unitemized)} unitemized ($200 or less)` : "itemized contributions"}</span></div>
       <div class="kpi"><span class="k">Avg donation</span><span class="v">${usd(rows.length ? total / rows.length : 0)}</span><span class="s">all itemized contributions</span></div>
       <div class="kpi"><span class="k">Avg donation</span><span class="v">${usd(indiv.length ? indivTotal / indiv.length : 0)}</span><span class="s">individuals only</span></div>
@@ -496,7 +558,7 @@ function renderContrib(body) {
 const BUCKET_ORDER = Object.keys(DATA.key);
 const bucketColor = code => `var(--c${BUCKET_ORDER.indexOf(code) + 1})`;
 function renderExpend(body) {
-  const { e: rows, coh, asOf } = currentRows();
+  const { e: rows, coh, asOfText } = currentRows();
   const total = rows.reduce((s, r) => s + r.amount, 0);
   const buckets = BUCKET_ORDER.map(code => ({ code, name: DATA.key[code], total: rows.filter(r => r.code === code).reduce((s, r) => s + r.amount, 0) })).filter(b => b.total > 0);
   const vend = new Map();
@@ -510,8 +572,8 @@ function renderExpend(body) {
 
   body.innerHTML = `
     <div class="kpis" style="--cols:4">
-      <div class="kpi hl"><span class="k">Cash on hand</span><span class="v">${usd(coh)}</span><span class="s">as of ${fdate(asOf)}</span></div>
-      <div class="kpi"><span class="k">Total spent</span><span class="v">${usd(total)}</span><span class="s">2026 Q1–Q2</span></div>
+      <div class="kpi hl"><span class="k">Cash on hand</span><span class="v">${usd(coh)}</span><span class="s">${esc(asOfText)}</span></div>
+      <div class="kpi"><span class="k">Total spent</span><span class="v">${usd(total)}</span><span class="s">${currentEntity() ? "since January " + DATA.since : esc(DATA.period)}</span></div>
       <div class="kpi"><span class="k">Expenditures</span><span class="v">${rows.length.toLocaleString()}</span><span class="s">line items</span></div>
       <div class="kpi"><span class="k">Vendors</span><span class="v">${vendors.length}</span><span class="s">after merging names</span></div>
     </div>
@@ -576,7 +638,7 @@ document.querySelectorAll("[data-party]").forEach(b => b.onclick = () => {
   document.querySelectorAll("[data-party]").forEach(x => x.setAttribute("aria-pressed", x === b));
   // stay on the same place; pick that party's first candidate
   if (S.geo && S.layer === "ld") { const c = ldCandidates(S.geo, S.party); S.entity = c[0]?.id || null; }
-  S.acct = "all"; S.open = {};
+  S.acct = "all"; S.view = "party"; S.open = {};
   drawMap(); renderPanel();
 });
 document.querySelectorAll("[data-layer]").forEach(b => b.onclick = () => {
